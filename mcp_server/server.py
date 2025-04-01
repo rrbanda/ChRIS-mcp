@@ -50,3 +50,14 @@ def chris_tool_chat(ctx: Context, message: str, username: str, password: str) ->
 
 if __name__ == "__main__":
     server.run()
+
+@server.tool()
+def llama_response(message: str) -> base.AssistantMessage:
+    """Call local Ollama (llama3) and return its response."""
+    result = subprocess.run(
+        ["ollama", "run", "llama3"],
+        input=message,
+        text=True,
+        capture_output=True
+    )
+    return base.AssistantMessage(result.stdout.strip())
