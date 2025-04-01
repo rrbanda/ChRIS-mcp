@@ -1,10 +1,7 @@
 [project]
 name = "chris-mcp"
 version = "0.1.0"
-dependencies = []
+requires-python = ">=3.10"
 
-[build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
-[tool.mcp]
-sampling_callback = "llm_handler:handle_sampling_message"
+[tool.setuptools.packages.find]
+include = ["mcp_server*"]
