@@ -1,0 +1,12 @@
+README.md
+pyproject.toml
+chris_mcp.egg-info/PKG-INFO
+chris_mcp.egg-info/SOURCES.txt
+chris_mcp.egg-info/dependency_links.txt
+chris_mcp.egg-info/top_level.txt
+mcp_server/__init__.py
+mcp_server/chris_api.py
+mcp_server/config.py
+mcp_server/entrypoint.py
+mcp_server/server.py
+tests/test_server.py
