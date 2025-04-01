@@ -1,19 +1,25 @@
-# llm_handler.py
 import subprocess
 import json
-from mcp import types
+from client import types
 
 async def handle_sampling_message(message: types.CreateMessageRequestParams) -> types.CreateMessageResult:
-    input_texts = [
-        f"{msg.role}: {msg.content.text}"
-        for msg in message.messages
-        if isinstance(msg.content, types.TextContent)
-    ]
-    prompt = "\n".join(input_texts)
+    # Prepare messages as JSON for input to Ollama
+    input_json = json.dumps({
+        "messages": [
+            {
+                "role": msg.role,
+                "content": {
+                    "type": "text",
+                    "text": msg.content.text if isinstance(msg.content, types.TextContent) else ""
+                }
+            } for msg in message.messages
+        ]
+    })
 
+    # Run llama3 with Ollama
     result = subprocess.run(
         ["ollama", "run", "llama3"],
-        input=prompt,
+        input=input_json,
         capture_output=True,
         text=True
     )
