@@ -1,5 +1,7 @@
 import requests
 
+CHRIS_URL = "http://localhost:8000"
+
 # Function to get the list of plugins from ChRIS
 def get_plugins(chris_url: str, username: str, password: str) -> dict:
     url = f"{chris_url}/api/v1/plugins/"
@@ -13,11 +15,11 @@ def get_plugin_instance_details(chris_url: str, username: str, password: str, in
     response = requests.get(url, auth=(username, password))
     response.raise_for_status()
 
-    # Extract the items from the response
     items = response.json().get("collection", {}).get("items", [])
     if not items:
-        return {"error": "Plugin instance not found"}  # Handle the case when no instance is found
-    
-    # Flatten the item["data"] list into a dict
+        return {"error": "Plugin instance not found"}
+
     data = items[0].get("data", [])
-    return {entry["name"]: entry["value"] for entry in data}  # Return plugin instance details as a dictionary
+    return {entry["name"]: entry["value"] for entry in data}
+
+# Other functions can remain the same...
