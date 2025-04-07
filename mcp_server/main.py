@@ -1,7 +1,7 @@
-from fastapi import FastAPI
-import uvicorn
-
-from mcp_server.sse_server import app  # Import the SSE server
+# mcp_server/main.py
+from mcp_server.sse_server import app
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8089)
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=7001)
+
