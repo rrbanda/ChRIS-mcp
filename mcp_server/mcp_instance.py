@@ -1,3 +1,5 @@
+# mcp_instance.py
+
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.server.fastmcp.prompts import base
 from mcp_server.chris_api import get_plugins, get_plugin_instance_details, get_pacs_files, get_user_files, get_pipelines, get_pipeline_details
@@ -6,6 +8,9 @@ CHRIS_URL = "http://localhost:8000"
 
 # Create the FastMCP server
 server = FastMCP("ChRIS MCP Server")
+
+# Debugging tool registration
+print("🧪 Registering tools...")
 
 # 🧠 Optional prompt (used for natural language reasoning in UI)
 @server.prompt()
@@ -19,11 +24,13 @@ def chris_chat(message: str) -> list[base.Message]:
 # 🔌 Plugin tool: list all ChRIS plugins
 @server.tool()
 def list_plugins(username: str, password: str) -> dict:
+    print("🔧 Tool 'list_plugins' registered.")  # Debugging tool registration
     return get_plugins(username, password)
 
 # 🔌 Plugin tool: get plugin instance details
 @server.tool()
 def get_plugin_instance(instance_id: int, username: str, password: str) -> dict:
+    print("🔧 Tool 'get_plugin_instance' registered.")  # Debugging tool registration
     return get_plugin_instance_details(username, password, instance_id)
 
 # 🔌 Tool to get PACS files
