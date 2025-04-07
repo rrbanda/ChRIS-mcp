@@ -1,2 +1,4 @@
-requests
-mcp
+fastapi
+uvicorn
+sse-starlette
+requests  # For API calls to ChRIS
