@@ -1,62 +1,83 @@
-# mcp_server/mcp_instance.py
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.server.fastmcp.prompts import base
-from mcp_server.chris_api import get_plugins, get_plugin_instance_details, get_pacs_files, get_user_files, get_pipelines, get_pipeline_details, search_plugins, create_pipeline
+from mcp_server.chris_api import get_plugins, get_plugin_instance_details, get_pacs_files, get_user_files, get_pipelines, get_pipeline_details
 
 CHRIS_URL = "http://localhost:8000"
 
 # Create the FastMCP server
 server = FastMCP("ChRIS MCP Server")
 
-# Tool to list all plugins using the get_plugins function from chris_api.py
+# 🧠 Optional prompt (used for natural language reasoning in UI)
+@server.prompt()
+def chris_chat(message: str) -> list[base.Message]:
+    return [
+        base.UserMessage("Here is what the user wants to do:"),
+        base.UserMessage(message),
+        base.AssistantMessage("Would you like me to list all available ChRIS plugins?")
+    ]
+
+# 🔌 Plugin tool: list all ChRIS plugins
 @server.tool()
 def list_plugins(username: str, password: str) -> dict:
-    return get_plugins(CHRIS_URL, username, password)
+    return get_plugins(username, password)
 
-# Tool to get plugin instance details using get_plugin_instance_details function from chris_api.py
+# 🔌 Plugin tool: get plugin instance details
 @server.tool()
 def get_plugin_instance(instance_id: int, username: str, password: str) -> dict:
-    return get_plugin_instance_details(CHRIS_URL, username, password, instance_id)
+    return get_plugin_instance_details(username, password, instance_id)
 
-# Tool to get PACS files using get_pacs_files function from chris_api.py
+# 🔌 Tool to get PACS files
 @server.tool()
 def list_pacs_files(username: str, password: str) -> dict:
-    return get_pacs_files(CHRIS_URL, username, password)
+    return get_pacs_files(username, password)
 
-# Tool to get user files using get_user_files function from chris_api.py
+# 🔌 Tool to get user files
 @server.tool()
 def list_user_files(username: str, password: str) -> dict:
-    return get_user_files(CHRIS_URL, username, password)
+    return get_user_files(username, password)
 
-# Tool to get all pipelines using get_pipelines function from chris_api.py
+# 🔌 Tool to list all pipelines
 @server.tool()
 def list_pipelines(username: str, password: str) -> dict:
-    return get_pipelines(CHRIS_URL, username, password)
+    return get_pipelines(username, password)
 
-# Tool to get details of a specific pipeline using get_pipeline_details function from chris_api.py
+# 🔌 Tool to get pipeline details
 @server.tool()
 def get_pipeline_details_tool(pipeline_id: int, username: str, password: str) -> dict:
-    return get_pipeline_details(CHRIS_URL, username, password, pipeline_id)
+    return get_pipeline_details(username, password, pipeline_id)
 
-# Tool to search for plugins using search_plugins function from chris_api.py
+# 🔌 Generic tool to handle plugin-related requests
 @server.tool()
-def search_for_plugins(query: dict, username: str, password: str) -> dict:
-    return search_plugins(CHRIS_URL, username, password, query)
+def chris_tool_chat(ctx: Context, message: str, username: str, password: str) -> list[base.Message]:
+    msg = message.lower()
 
-# Tool to create a new pipeline
-@server.tool()
-def create_chris_pipeline(username: str, password: str, pipeline_data: dict) -> dict:
-    """Tool to create a new pipeline."""
-    try:
-        # Ensure the required fields are in the pipeline_data
-        required_fields = ['name', 'description', 'plugin_ids']
-        if not all(field in pipeline_data for field in required_fields):
-            raise ValueError(f"Missing required fields: {', '.join([field for field in required_fields if field not in pipeline_data])}")
+    if "plugin" in msg:
+        plugins = get_plugins(username, password)
+        names = [p["name"] for p in plugins.get("plugins", [])]
+        return [
+            base.UserMessage("Listing all plugins."),
+            base.AssistantMessage("Plugins:\n" + "\n".join(f"- {n}" for n in names))
+        ]
+    
+    if "instance" in msg:
+        try:
+            instance_id = int(next(word for word in msg.split() if word.isdigit()))
+            instance = get_plugin_instance_details(username, password, instance_id)
+            formatted = "\n".join(f"{k}: {v}" for k, v in instance.items())
+            return [
+                base.UserMessage(f"You asked for instance {instance_id}"),
+                base.AssistantMessage(f"Here are the details:\n{formatted}")
+            ]
+        except Exception as e:
+            return [
+                base.AssistantMessage(f"❌ Failed to fetch instance info: {str(e)}")
+            ]
+    
+    return [base.AssistantMessage("Try saying: 'Show plugin instance 2'")]
 
-        # Call the ChRIS API to create the pipeline
-        return create_pipeline(CHRIS_URL, username, password, pipeline_data)
-    except Exception as e:
-        return {"error": f"Failed to create pipeline: {str(e)}"}
+# Start the server
+if __name__ == "__main__":
+    server.run()
 
-# Export the server for usage in sse_server.py
+# Export the server instance to be used in the SSE server
 __all__ = ["server"]
