@@ -1,11 +1,9 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
+from mcp_server.mcp_instance import server  # Import the FastMCP server instance
 import uuid
 import json
-
-# Import FastMCP server instance
-from mcp_server.mcp_instance import server
 
 # Create FastAPI app
 app = FastAPI(title="ChRIS MCP SSE Server")
@@ -25,22 +23,23 @@ def read_root():
 
 @app.post("/tool/{tool_name}")
 async def run_tool(tool_name: str, request: Request):
-    body = await request.json()
+    body = await request.body()
+    print(f"Received Body: {body.decode()}")  # Debugging step
+
+    body = await request.json()  # Now parse it into JSON
     call_id = str(uuid.uuid4())
 
     async def event_stream():
         try:
             yield {"event": "start", "id": call_id, "data": f"Running tool: {tool_name}"}
-            
-            # Get the tool function from the server
-            tool_map = getattr(server, "_tool_map", {})
-            tool_func = tool_map.get(tool_name)
+
+            # Use server's built-in get_tool method
+            tool_func = server.get_tool(tool_name)
 
             if not tool_func:
                 yield {"event": "error", "id": call_id, "data": f"Tool '{tool_name}' not found"}
                 return
 
-            # Run the tool function
             kwargs = body if isinstance(body, dict) else {}
             result = await tool_func(**kwargs)
 
