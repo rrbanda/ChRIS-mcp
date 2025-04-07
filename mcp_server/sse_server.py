@@ -1,3 +1,4 @@
+# mcp_server/sse_server.py
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
