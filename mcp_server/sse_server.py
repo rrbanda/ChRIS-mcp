@@ -1,9 +1,11 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
-from mcp_server.mcp_instance import server  # Import the FastMCP server instance
 import uuid
 import json
+
+# Import FastMCP server instance
+from mcp_server.mcp_instance import server
 
 # Create FastAPI app
 app = FastAPI(title="ChRIS MCP SSE Server")
@@ -28,8 +30,9 @@ async def run_tool(tool_name: str, request: Request):
 
     async def event_stream():
         try:
-            # Send the start event
             yield {"event": "start", "id": call_id, "data": f"Running tool: {tool_name}"}
+            
+            # Get the tool function from the server
             tool_map = getattr(server, "_tool_map", {})
             tool_func = tool_map.get(tool_name)
 
@@ -37,10 +40,10 @@ async def run_tool(tool_name: str, request: Request):
                 yield {"event": "error", "id": call_id, "data": f"Tool '{tool_name}' not found"}
                 return
 
+            # Run the tool function
             kwargs = body if isinstance(body, dict) else {}
             result = await tool_func(**kwargs)
 
-            # Send result event
             yield {"event": "result", "id": call_id, "data": json.dumps(result, default=str)}
             yield {"event": "end", "id": call_id, "data": "Tool execution complete"}
 
