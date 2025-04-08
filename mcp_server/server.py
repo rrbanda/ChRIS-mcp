@@ -33,46 +33,79 @@ def get_chris_root(*, args: Dict[str, Any]) -> str:
     except Exception as e:
         raise McpError(ErrorData(INTERNAL_ERROR, f"Unexpected error: {str(e)}")) from e
 
+# chat chris tool
+
+import subprocess
+import json
+from typing import Dict, Any
+
 @mcp.tool()
-def chris_chat(args: Dict[str, Any]) -> str:
-    real_args = args.get("args", {})  # MCP Inspector wraps it like this
-    query = real_args.get("query", "")
+async def chris_chat(*, args: Dict[str, Any]) -> str:
+    """
+    Natural language query handler for ChRIS via MCP.
 
+    Uses:
+    - Ollama (Mistral) to select a tool like get_chris_root
+    - Calls that tool using MCP
+    - Then summarizes the result using LLM again
+
+    Input example:
+    {
+      "args": {
+        "query": "What is the root endpoint of the ChRIS API?"
+      }
+    }
+    """
+    # Handle both flat and nested query structure
+    query = args.get("query") or args.get("args", {}).get("query")
     if not query:
-        return f"DEBUG: Missing 'query'. Full args={args}"
+        return "Please provide a question via the 'query' argument."
 
+    # Step 1: Ask LLM which tool to route to
     try:
-        import subprocess
+        tool_prompt = f"""
+You are an assistant that helps route natural language questions to MCP tools.
 
-        # Use LLM to decide which tool to call
-        system_prompt = (
-            "You are a helpful agent for the ChRIS API. "
-            "Only say the name of the tool that should be called. Available: get_chris_root"
+Available tools:
+- get_chris_root: Fetches the root Collection+JSON from a ChRIS API instance.
+
+User question:
+{query}
+
+Respond with only the tool name (e.g., get_chris_root). Do not explain.
+""".strip()
+
+        tool_resp = subprocess.run(
+            ["ollama", "run", "mistral", tool_prompt],
+            capture_output=True, text=True, timeout=10
         )
-        full_prompt = f"{system_prompt}\n\nUser said: {query}\nTool:"
-
-        result = subprocess.run(
-            ["ollama", "run", "mistral"],
-            input=full_prompt.encode(),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=30,
-        )
-
-        if result.returncode != 0:
-            return f"Ollama error: {result.stderr.decode()}"
-
-        tool_name = result.stdout.decode().strip().lower()
-
-        if "get_chris_root" in tool_name:
-            return get_chris_root(args={"url": "https://cube.chrisproject.org/api/v1/"})
-
-        return f"No matching tool. LLM said: {tool_name}"
-
-    except subprocess.TimeoutExpired:
-        return "LLM timed out."
+        tool_name = tool_resp.stdout.strip().split()[0]
     except Exception as e:
-        return f"Unexpected error: {str(e)}"
+        return f"Tool routing failed via LLM: {e}"
+
+    # Step 2: Call the selected tool with empty args
+    try:
+        tool_output = await mcp.call_tool(tool_name, arguments={"args": {}})
+    except Exception as e:
+        return f"Tool '{tool_name}' call failed: {e}"
+
+    # Step 3: Ask LLM to summarize the tool output
+    try:
+        summary_prompt = f"""
+The following is the JSON output from a ChRIS API tool ('{tool_name}').
+
+Summarize it in plain language so a user can understand what it means:
+
+{tool_output}
+""".strip()
+
+        summary_resp = subprocess.run(
+            ["ollama", "run", "mistral", summary_prompt],
+            capture_output=True, text=True, timeout=20
+        )
+        return summary_resp.stdout.strip()
+    except Exception as e:
+        return f"Tool '{tool_name}' succeeded, but LLM summarization failed: {e}"
 
 
 # === SSE Transport ===
