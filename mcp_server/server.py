@@ -11,6 +11,7 @@ from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.routing import Route, Mount
 import time
+from mcp.types import ErrorData, INTERNAL_ERROR, INVALID_PARAMS
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -39,84 +40,50 @@ def get_chris_root(*, args: Dict[str, Any]) -> str:
     except Exception as e:
         raise McpError(ErrorData(INTERNAL_ERROR, f"Unexpected error: {str(e)}")) from e
 
-# === chris_chat tool ===
+# === Tool 2: List Plugins ===
 @mcp.tool()
-async def chris_chat(*, args: Dict[str, Any]) -> str:
+def list_plugins(*, args: Dict[str, Any]) -> str:
     """
-    Natural language query handler for ChRIS via MCP.
-
-    Uses:
-    - Ollama (Llama3.2) to select a tool like get_chris_root
-    - Calls that tool using MCP
-    - Then summarizes the result using LLM again
-
-    Input example:
-    {
-      "args": {
-        "query": "What is the root endpoint of the ChRIS API?"
-      }
-    }
+    Lists all available plugins in the ChRIS API instance.
     """
-    # Handle both flat and nested query structure
-    query = args.get("query") or args.get("args", {}).get("query")
-    if not query:
-        return "Please provide a question via the 'query' argument."
+    url = args.get("url", "https://cube.chrisproject.org/api/v1/plugins/")
+    if not url.startswith("http"):
+        raise McpError(ErrorData(INVALID_PARAMS, "URL must start with http or https."))
 
-    # Step 1: Ask LLM which tool to route to
     try:
-        tool_prompt = f"""
-You are an assistant that helps route natural language questions to MCP tools.
-
-Available tools:
-- get_chris_root: Fetches the root Collection+JSON from a ChRIS API instance.
-
-User question:
-{query}
-
-Respond with only the tool name (e.g., get_chris_root). Do not explain.
-""".strip()
-
-        # Run LLM to decide the tool to use (switching to llama3.2)
-        logger.debug(f"LLM tool routing prompt: {tool_prompt}")
-        tool_resp = subprocess.run(
-            ["ollama", "run", "llama3.2", tool_prompt],  # Using llama3.2 model
-            capture_output=True, text=True, timeout=10
-        )
-        tool_name = tool_resp.stdout.strip().split()[0]
-        logger.debug(f"LLM chose tool: {tool_name}")
+        response = requests.get(url, timeout=60)
+        response.raise_for_status()
+        logger.debug(f"Response from ChRIS Plugin List: {response.json()}")
+        return json.dumps(response.json(), indent=2)
+    except requests.RequestException as e:
+        raise McpError(ErrorData(INTERNAL_ERROR, f"ChRIS plugin list error: {str(e)}")) from e
     except Exception as e:
-        logger.error(f"Tool routing failed via LLM: {e}")
-        return f"Tool routing failed via LLM: {e}"
+        raise McpError(ErrorData(INTERNAL_ERROR, f"Unexpected error: {str(e)}")) from e
 
-    # Step 2: Call the selected tool with empty args and await the result
+
+
+
+
+@mcp.tool()
+def get_plugin_instance(*, args: Dict[str, Any]) -> str:
+    """
+    Fetch a specific plugin instance by ID from the ChRIS API.
+    """
+    plugin_id = args.get("id")
+    if not plugin_id:
+        raise McpError(ErrorData(code=INVALID_PARAMS, message="Missing required argument: 'id'"))
+
+    url = f"https://cube.chrisproject.org/api/v1/plugins/instances/{plugin_id}/"
     try:
-        tool_output = await mcp.call_tool(tool_name, arguments={"args": {}})
-        logger.debug(f"Tool '{tool_name}' output: {tool_output}")
+        response = requests.get(url, timeout=60)
+        response.raise_for_status()
+        logger.debug(f"Plugin instance {plugin_id} response: {response.json()}")
+        return json.dumps(response.json(), indent=2)
+    except requests.RequestException as e:
+        raise McpError(ErrorData(code=INTERNAL_ERROR, message=f"ChRIS API error: {str(e)}")) from e
     except Exception as e:
-        logger.error(f"Tool '{tool_name}' call failed: {e}")
-        return f"Tool '{tool_name}' call failed: {e}"
+        raise McpError(ErrorData(code=INTERNAL_ERROR, message=f"Unexpected error: {str(e)}")) from e
 
-    # Step 3: Ask LLM to summarize the tool output
-    try:
-        summary_prompt = f"""
-The following is the JSON output from a ChRIS API tool ('{tool_name}').
-
-Summarize it in plain language so a user can understand what it means:
-
-{tool_output}
-""".strip()
-
-        # Summarize the tool output with LLM (llama3.2)
-        logger.debug(f"LLM summarization prompt: {summary_prompt}")
-        summary_resp = subprocess.run(
-            ["ollama", "run", "llama3.2", summary_prompt],  # Using llama3.2 model for summarization
-            capture_output=True, text=True, timeout=20
-        )
-        logger.debug(f"LLM summary: {summary_resp.stdout.strip()}")
-        return summary_resp.stdout.strip()
-    except Exception as e:
-        logger.error(f"Tool '{tool_name}' succeeded, but LLM summarization failed: {e}")
-        return f"Tool '{tool_name}' succeeded, but LLM summarization failed: {e}"
 
 # === SSE Transport ===
 sse = SseServerTransport("/messages/")
@@ -142,4 +109,4 @@ app = Starlette(
 # === Entry Point ===
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="localhost", port=8000)
+    uvicorn.run(app, host="localhost", port=3001)
