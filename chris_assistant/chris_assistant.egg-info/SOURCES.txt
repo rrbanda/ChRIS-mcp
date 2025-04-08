@@ -1,0 +1,11 @@
+LICENSE
+README.md
+pyproject.toml
+chris_assistant/__init__.py
+chris_assistant/cli.py
+chris_assistant.egg-info/PKG-INFO
+chris_assistant.egg-info/SOURCES.txt
+chris_assistant.egg-info/dependency_links.txt
+chris_assistant.egg-info/entry_points.txt
+chris_assistant.egg-info/requires.txt
+chris_assistant.egg-info/top_level.txt

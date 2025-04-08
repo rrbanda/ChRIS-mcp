@@ -1,0 +1,2 @@
+[console_scripts]
+chris-assistant = chris_assistant.cli:run

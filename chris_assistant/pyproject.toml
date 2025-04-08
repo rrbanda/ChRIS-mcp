@@ -1,0 +1,25 @@
+[project]
+name = "chris-assistant"
+version = "0.1.0"
+description = "An AI-powered CLI for exploring the ChRIS medical image platform using MCP and Llama3"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+  {name = "Raghuram Banda", email = "rbanda@redhat.com"}
+]
+requires-python = ">=3.9"
+keywords = ["chris", "mcp", "ai", "llama3", "cli", "ollama", "medical-imaging"]
+
+dependencies = [
+  "llama-index>=0.10.0",
+  "ollama>=0.1.0",
+  "mcp>=0.1.0",
+  "httpx>=0.25.0",
+]
+
+[project.scripts]
+chris-assistant = "chris_assistant.cli:run"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
