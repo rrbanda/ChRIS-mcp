@@ -2,7 +2,6 @@ import requests
 import json
 from typing import Dict, Any
 import subprocess
-from typing import Dict, Any
 from mcp.server.fastmcp import FastMCP
 from mcp.shared.exceptions import McpError
 from mcp.types import ErrorData, INTERNAL_ERROR, INVALID_PARAMS
@@ -10,9 +9,13 @@ from mcp.server.sse import SseServerTransport
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.routing import Route, Mount
+import time
+import subprocess
+import json
+from typing import Dict, Any
 
 # Create FastMCP instance
-mcp = FastMCP("chris") 
+mcp = FastMCP("chris")
 
 # === Tool 1: Get ChRIS Root ===
 @mcp.tool()
@@ -25,7 +28,7 @@ def get_chris_root(*, args: Dict[str, Any]) -> str:
         raise McpError(ErrorData(INVALID_PARAMS, "URL must start with http or https."))
 
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=60)  # Extended timeout
         response.raise_for_status()
         return json.dumps(response.json(), indent=2)
     except requests.RequestException as e:
@@ -33,11 +36,9 @@ def get_chris_root(*, args: Dict[str, Any]) -> str:
     except Exception as e:
         raise McpError(ErrorData(INTERNAL_ERROR, f"Unexpected error: {str(e)}")) from e
 
-# chat chris tool
+# === chris_chat tool ===
 
-import subprocess
-import json
-from typing import Dict, Any
+
 
 @mcp.tool()
 async def chris_chat(*, args: Dict[str, Any]) -> str:
@@ -107,15 +108,17 @@ Summarize it in plain language so a user can understand what it means:
     except Exception as e:
         return f"Tool '{tool_name}' succeeded, but LLM summarization failed: {e}"
 
-
 # === SSE Transport ===
 sse = SseServerTransport("/messages/")
 
 async def handle_sse(request: Request) -> None:
     _server = mcp._mcp_server
-    async with sse.connect_sse(request.scope, request.receive, request._send) as (reader, writer):
-        await _server.run(reader, writer, _server.create_initialization_options())
-
+    try:
+        async with sse.connect_sse(request.scope, request.receive, request._send) as (reader, writer):
+            await _server.run(reader, writer, _server.create_initialization_options())
+    except Exception as e:
+        print(f"[ERROR] SSE connection failed: {e}")
+        raise
 
 # === Starlette App ===
 app = Starlette(
