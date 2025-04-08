@@ -1,118 +1,99 @@
+import requests
+import json
+from typing import Dict, Any
 import subprocess
-from mcp.server.fastmcp import FastMCP, Context
-from mcp.server.fastmcp.prompts import base
+from typing import Dict, Any
+from mcp.server.fastmcp import FastMCP
+from mcp.shared.exceptions import McpError
+from mcp.types import ErrorData, INTERNAL_ERROR, INVALID_PARAMS
+from mcp.server.sse import SseServerTransport
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.routing import Route, Mount
 
-# Import functions from chris_api.py
-from mcp_server.chris_api import get_plugins, get_plugin_instance_details, get_pacs_files, get_user_files, get_pipelines, get_pipeline_details, search_plugins, create_pipeline
+# Create FastMCP instance
+mcp = FastMCP("chris") 
 
-CHRIS_URL = "http://localhost:8000"
+# === Tool 1: Get ChRIS Root ===
+@mcp.tool()
+def get_chris_root(*, args: Dict[str, Any]) -> str:
+    """
+    Fetch the root Collection+JSON document from a ChRIS API instance.
+    """
+    url = args.get("url", "https://cube.chrisproject.org/api/v1/")
+    if not url.startswith("http"):
+        raise McpError(ErrorData(INVALID_PARAMS, "URL must start with http or https."))
 
-server = FastMCP("ChRIS MCP Server")
-
-# Define a simple chat prompt in MCP Inspector
-@server.prompt()
-def chris_chat(message: str) -> list[base.Message]:
-    return [
-        base.UserMessage("Here is what the user wants to do:"),
-        base.UserMessage(message),
-        base.AssistantMessage("Would you like me to list all available ChRIS plugins?")
-    ]
-
-# Tool to list all plugins using the get_plugins function from chris_api.py
-@server.tool()
-def list_plugins(username: str, password: str) -> dict:
-    return get_plugins(CHRIS_URL, username, password)
-
-# Tool to get plugin instance details using get_plugin_instance_details function from chris_api.py
-@server.tool()
-def get_plugin_instance(instance_id: int, username: str, password: str) -> dict:
-    return get_plugin_instance_details(CHRIS_URL, username, password, instance_id)
-
-# Tool to get PACS files using get_pacs_files function from chris_api.py
-@server.tool()
-def list_pacs_files(username: str, password: str) -> dict:
-    return get_pacs_files(CHRIS_URL, username, password)
-
-# Tool to get user files using get_user_files function from chris_api.py
-@server.tool()
-def list_user_files(username: str, password: str) -> dict:
-    return get_user_files(CHRIS_URL, username, password)
-
-# Tool to get all pipelines using get_pipelines function from chris_api.py
-@server.tool()
-def list_pipelines(username: str, password: str) -> dict:
-    return get_pipelines(CHRIS_URL, username, password)
-
-# Tool to get details of a specific pipeline using get_pipeline_details function from chris_api.py
-@server.tool()
-def get_pipeline_details_tool(pipeline_id: int, username: str, password: str) -> dict:
-    return get_pipeline_details(CHRIS_URL, username, password, pipeline_id)
-
-# Tool to search for plugins using search_plugins function from chris_api.py
-@server.tool()
-def search_for_plugins(query: dict, username: str, password: str) -> dict:
-    return search_plugins(CHRIS_URL, username, password, query)
-
-
-@server.tool()
-def create_chris_pipeline(username: str, password: str, pipeline_data: dict) -> dict:
-    """Tool to create a new pipeline."""
     try:
-        # Ensure the required fields are in the pipeline_data
-        required_fields = ['name', 'description', 'plugin_ids']
-        if not all(field in pipeline_data for field in required_fields):
-            raise ValueError(f"Missing required fields: {', '.join([field for field in required_fields if field not in pipeline_data])}")
-
-        # Call the ChRIS API to create the pipeline
-        return create_pipeline(CHRIS_URL, username, password, pipeline_data)
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        return json.dumps(response.json(), indent=2)
+    except requests.RequestException as e:
+        raise McpError(ErrorData(INTERNAL_ERROR, f"ChRIS API error: {str(e)}")) from e
     except Exception as e:
-        return {"error": f"Failed to create pipeline: {str(e)}"}
+        raise McpError(ErrorData(INTERNAL_ERROR, f"Unexpected error: {str(e)}")) from e
+
+@mcp.tool()
+def chris_chat(args: Dict[str, Any]) -> str:
+    real_args = args.get("args", {})  # MCP Inspector wraps it like this
+    query = real_args.get("query", "")
+
+    if not query:
+        return f"DEBUG: Missing 'query'. Full args={args}"
+
+    try:
+        import subprocess
+
+        # Use LLM to decide which tool to call
+        system_prompt = (
+            "You are a helpful agent for the ChRIS API. "
+            "Only say the name of the tool that should be called. Available: get_chris_root"
+        )
+        full_prompt = f"{system_prompt}\n\nUser said: {query}\nTool:"
+
+        result = subprocess.run(
+            ["ollama", "run", "mistral"],
+            input=full_prompt.encode(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=30,
+        )
+
+        if result.returncode != 0:
+            return f"Ollama error: {result.stderr.decode()}"
+
+        tool_name = result.stdout.decode().strip().lower()
+
+        if "get_chris_root" in tool_name:
+            return get_chris_root(args={"url": "https://cube.chrisproject.org/api/v1/"})
+
+        return f"No matching tool. LLM said: {tool_name}"
+
+    except subprocess.TimeoutExpired:
+        return "LLM timed out."
+    except Exception as e:
+        return f"Unexpected error: {str(e)}"
 
 
+# === SSE Transport ===
+sse = SseServerTransport("/messages/")
 
-# A generic tool that handles plugin-related requests (list plugins, show instance details, etc.)
-@server.tool()
-def chris_tool_chat(ctx: Context, message: str, username: str, password: str) -> list[base.Message]:
-    msg = message.lower()
+async def handle_sse(request: Request) -> None:
+    _server = mcp._mcp_server
+    async with sse.connect_sse(request.scope, request.receive, request._send) as (reader, writer):
+        await _server.run(reader, writer, _server.create_initialization_options())
 
-    if "plugin" in msg:
-        plugins = get_plugins(CHRIS_URL, username, password)
-        names = [p["name"] for p in plugins.get("plugins", [])]
-        return [
-            base.UserMessage("Listing all plugins."),
-            base.AssistantMessage("Plugins:\n" + "\n".join(f"- {n}" for n in names))
-        ]
-    
-    if "instance" in msg:
-        try:
-            parts = msg.split()
-            instance_id = int(next(word for word in parts if word.isdigit()))
-            instance = get_plugin_instance_details(CHRIS_URL, username, password, instance_id)
-            formatted = "\n".join(f"{k}: {v}" for k, v in instance.items())
-            return [
-                base.UserMessage(f"You asked for instance {instance_id}"),
-                base.AssistantMessage(f"Here are the details:\n{formatted}")
-            ]
-        except Exception as e:
-            return [
-                base.AssistantMessage(f"❌ Failed to fetch instance info: {str(e)}")
-            ]
-    
-    return [base.AssistantMessage("Try saying: 'Show plugin instance 2'")]
 
-# Optional LLM wrapper
-@server.tool()
-def llama_response(message: str) -> base.AssistantMessage:
-    result = subprocess.run(
-        ["ollama", "run", "llama3"],
-        input=message,
-        text=True,
-        capture_output=True
-    )
-    return base.AssistantMessage(result.stdout.strip())
+# === Starlette App ===
+app = Starlette(
+    debug=True,
+    routes=[
+        Route("/sse", endpoint=handle_sse),
+        Mount("/messages/", app=sse.handle_post_message),
+    ],
+)
 
+# === Entry Point ===
 if __name__ == "__main__":
-    server.run()
-
-# Required for MCP CLI discovery
-__all__ = ["server"]
+    import uvicorn
+    uvicorn.run(app, host="localhost", port=8000)
