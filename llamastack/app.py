@@ -1,79 +1,100 @@
-import streamlit as st
-from llama_stack_client import LlamaStackClient
-from llama_stack_client.lib.agents.agent import Agent
-from llama_stack_client.types.agent_create_params import AgentConfig
-from utils import check_model_is_available, get_any_available_model
+# app.py
 import os
-base_url = os.getenv("BASE_URL", "http://host.containers.internal:8321") 
+import json
+import asyncio
+import subprocess
+import streamlit as st
+from llama_index.tools.mcp import BasicMCPClient, McpToolSpec
+from llama_index.llms.ollama import Ollama
+from llama_index.core.agent.workflow import ReActAgent
 
-# Initialize LlamaStack client
-client = LlamaStackClient(
-    base_url=base_url,
-)
-model = get_any_available_model(client)
+# === CONFIG ===
+MCP_URL = "https://chris-mcp-server-llama-stack.apps.prod.rhoai.rh-aiservices-bu.com/sse"
+MODEL_NAME = "llama3"
+TEMPERATURE = 0.7
 
+# Optional config injection
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
+CONFIG = {}
+if os.path.exists(CONFIG_PATH):
+    with open(CONFIG_PATH) as f:
+        CONFIG = json.load(f)
 
-# Streamlit UI
-st.title("Llama-stack MCP server demo")
-st.markdown("Query an orders system using MCP and Llama-stack")
-enquiry = st.sidebar.text_area("Customer Enquiry", "Enquiry from customer regarding order id ORD1001")
-# Chat history management if not initialized
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-# Display chat history
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-
-# Input for new messages
-prompt = st.chat_input("Ask something...")
-if prompt:
-    full_response = ""
-    agent_config = AgentConfig(
-        model=model,
-        instructions="You are a helpful customer service assistant, answer the following query relating to customer orders.",
-        sampling_params={
-            "strategy": {"type": "top_p", "temperature": 1.0, "top_p": 0.9},
-        },
-        toolgroups=(
-            [
-                "mcp::chris"
-            ]
-        ),
-        tool_choice="auto",
-        input_shields=[],
-        output_shields=[],
-        enable_session_persistence=True,
+@st.cache_resource
+def setup_agent():
+    mcp_client = BasicMCPClient(MCP_URL)
+    tools = asyncio.run(McpToolSpec(client=mcp_client).to_tool_list_async())
+    llm = Ollama(model=MODEL_NAME, temperature=TEMPERATURE)
+    agent = ReActAgent(
+        name="ChRISAgent",
+        llm=llm,
+        tools=tools,
+        system_prompt="You are an assistant for the ChRIS medical image platform.",
+        temperature=TEMPERATURE,
     )
-    agent = Agent(client, agent_config)
-    session_id = agent.create_session("test-session")
-    # Add user input to chat history
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    return agent, mcp_client, tools
 
-    # Get response from LlamaStack API
-    with st.chat_message("assistant"):
-        message_placeholder = st.empty()
-        response = agent.create_turn(
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt ,
-                }
-            ],
-            session_id=session_id,
-        )
-     
-        for chunk in response:
-            print(chunk)
-            if chunk.event.payload.event_type == "step_progress":
-                if chunk.event.payload.delta.type == "text":
-                    full_response += chunk.event.payload.delta.text
-                    message_placeholder.markdown(full_response + "▌")
-            message_placeholder.markdown(full_response)
-    
-        st.session_state.messages.append({"role": "assistant", "content": full_response})
+def route_tool_and_args(query, tools):
+    tool_list = "\n".join(f"- {t.metadata.name}: {t.metadata.description}" for t in tools)
+    routing_prompt = f"""
+Available tools:
+{tool_list}
 
-    
+User query:
+"{query}"
+
+Respond in this exact JSON format (no commentary):
+{{
+  "tool": "<tool_name>",
+  "args": {{
+    ... tool arguments ...
+  }}
+}}
+""".strip()
+
+    result = subprocess.run(["ollama", "run", MODEL_NAME], input=routing_prompt, capture_output=True, text=True)
+    try:
+        parsed = json.loads(result.stdout.strip())
+        tool = parsed["tool"]
+        args = parsed.get("args", {})
+        # Inject missing args from config
+        for key in ["url", "username", "password"]:
+            if key not in args and key in CONFIG:
+                args[key] = CONFIG[key]
+        return tool, args
+    except Exception as e:
+        st.error(f"Routing failed: {e}")
+        st.text(result.stdout)
+        return None, {}
+
+def summarize_output(raw):
+    prompt = f"Summarize this ChRIS API response:\n\n{raw}"
+    result = subprocess.run(["ollama", "run", MODEL_NAME], input=prompt, capture_output=True, text=True)
+    return result.stdout.strip()
+
+# === Streamlit UI ===
+st.set_page_config(page_title="ChRIS + MCP via LlamaStack", layout="wide")
+st.title("🧠 ChRIS Agent with LlamaStack")
+
+agent, mcp, tools = setup_agent()
+
+query = st.text_input("Ask a question about ChRIS:", placeholder="e.g. What plugins are available?")
+
+if query:
+    with st.spinner("Routing query and executing tool..."):
+        tool, args = route_tool_and_args(query, tools)
+        if tool:
+            st.markdown(f"🔧 Tool: `{tool}`")
+            st.json(args)
+
+            try:
+                response = asyncio.run(mcp.call_tool(tool, {"args": args}))
+                raw_output = str(response)
+                st.subheader("📄 Raw Output")
+                st.code(raw_output, language="json")
+
+                summary = summarize_output(raw_output)
+                st.subheader("📝 Summary")
+                st.success(summary)
+            except Exception as e:
+                st.error(f"❌ Error calling tool: {e}")
