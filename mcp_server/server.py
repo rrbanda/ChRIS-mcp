@@ -26,6 +26,19 @@ logger = logging.getLogger(__name__)
 # Create FastMCP instance
 mcp = FastMCP("chris")
 
+@mcp.tool(
+    name="health_check",
+    description="Simple test tool to confirm LlamaStack <-> ChRIS MCP integration is working."
+)
+def health_check(*, args: Dict[str, Any]) -> str:
+    return json.dumps({
+        "status": "✅ MCP server is alive and reachable!",
+        "message": "This response is from the ChRIS MCP server integrated with LlamaStack.",
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
+        "tool": "health_check"
+    }, indent=2)
+
+
 # === Tool 1: Get ChRIS Root ===
 @mcp.tool()
 def get_chris_root(*, args: Dict[str, Any]) -> str:
