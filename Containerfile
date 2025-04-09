@@ -2,13 +2,17 @@ FROM registry.access.redhat.com/ubi9/python-311:latest
 
 WORKDIR /app
 
-# Copy code and install deps
+# Copy your MCP server code
 COPY mcp_server /app/mcp_server
-COPY requirements.txt /app/requirements.txt
+COPY requirements.txt .
 
-RUN pip install --no-cache-dir -r /app/requirements.txt
+# 🟡 Install MCP SDK from GitHub (FastMCP)
+RUN pip install --no-cache-dir "mcp[fastmcp] @ git+https://github.com/ml-explore/mcp.git"
+
+# ✅ Install your app requirements
+RUN pip install --no-cache-dir -r requirements.txt
 
 EXPOSE 3001
 
-# 🟢 Start the FastAPI MCP server
+# ✅ Run the FastMCP server
 CMD ["uvicorn", "mcp_server.server:app", "--host", "0.0.0.0", "--port", "3001"]
