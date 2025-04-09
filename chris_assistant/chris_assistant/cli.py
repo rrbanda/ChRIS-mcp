@@ -10,6 +10,12 @@ from llama_index.llms.ollama import Ollama
 MCP_URL = os.environ.get("MCP_URL", "http://localhost:3001/sse")
 MODEL_NAME = os.environ.get("LLM_MODEL", "llama3.2")
 TEMPERATURE = float(os.environ.get("LLM_TEMPERATURE", "0.7"))
+# Correct CONFIG_PATH
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json")
+
+
+with open(os.path.abspath(CONFIG_PATH), "r") as f:
+    CONFIG = json.load(f)
 
 # === AGENT SETUP ===
 async def setup_agent():
@@ -20,7 +26,7 @@ async def setup_agent():
     tools = await McpToolSpec(client=mcp_client).to_tool_list_async()
     print(f"✅ Found {len(tools)} tools:")
     for tool in tools:
-        print(f" • {tool.metadata.name}: {tool.metadata.description}")
+        print(f" • {tool.metadata.name}: {tool.metadata.description or 'No description'}")
 
     print(f"🤖 Initializing Ollama with model: {MODEL_NAME}")
     llm = Ollama(model=MODEL_NAME, temperature=TEMPERATURE)
@@ -35,9 +41,9 @@ async def setup_agent():
     return agent, mcp_client
 
 # === TOOL ROUTER WITH ARGUMENT INJECTION ===
-def route_tool_and_args(query: str, tools: list) -> tuple[str, dict]:
+def route_tool_and_args(query: str, tools: list, config: dict) -> tuple[str, dict]:
     tool_descriptions = "\n".join(
-        f"- {tool.metadata.name}: {tool.metadata.description}" for tool in tools
+        f"- {tool.metadata.name}: {tool.metadata.description or 'No description'}" for tool in tools
     )
 
     prompt = f"""
@@ -60,11 +66,17 @@ Respond in this exact JSON format (no preamble or comments):
 
     print("🧭 Routing tool and extracting args using Llama3...")
     result = subprocess.run(["ollama", "run", MODEL_NAME], input=prompt, capture_output=True, text=True)
-    
+
     try:
         parsed = json.loads(result.stdout.strip())
         tool_name = parsed["tool"]
         args = parsed.get("args", {})
+
+        # Inject credentials from config if missing
+        for field in ["url", "username", "password"]:
+            if not args.get(field):
+                args[field] = config.get(field)
+
         print(f"📦 Routed to: {tool_name} with args: {args}")
         return tool_name, args
     except Exception as e:
@@ -83,7 +95,9 @@ async def main():
     print("Ask questions like:")
     print("  • What's at the root of the ChRIS API?")
     print("  • What plugins are available?")
-    print("  • Show me plugin instance 2\n")
+    print("  • Show me plugin instance 2")
+    print("  • Search for plugin pl-dircopy")
+    print("  • Run plugin with ID 5 and dir /uploads/\n")
 
     agent, mcp = await setup_agent()
 
@@ -97,23 +111,20 @@ async def main():
                 break
 
             # Step 1: Route tool + extract args
-            tool, args = route_tool_and_args(query, agent.tools)
+            tool, args = route_tool_and_args(query, agent.tools, CONFIG)
 
             # Step 2: Call tool via MCP
             print(f"🚀 Calling `{tool}` tool via MCP...")
-            response = await mcp.call_tool(tool, arguments={"args": args})
+            response = await mcp.call_tool(tool, {"args": args})
             print("🗂️ Raw output received.")
 
             # Step 3: Summarize
-            summary = summarize_output(response)
+            summary = summarize_output(str(response))
             print("\n📋 Summary:\n", summary)
 
         except Exception as e:
             print(f"❌ Error: {e}")
 
-# === ENTRY POINT ===
-if __name__ == "__main__":
-    asyncio.run(main())
 # === ENTRY POINT ===
 def run():
     asyncio.run(main())
