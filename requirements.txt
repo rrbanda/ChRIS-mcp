@@ -2,3 +2,6 @@ fastapi
 uvicorn
 sse-starlette
 requests
+mcp==1.6.0
+fastmcp==0.4.1
+llama-index-tools-mcp==0.1.1
