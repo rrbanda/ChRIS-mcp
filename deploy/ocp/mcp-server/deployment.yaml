@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chris-mcp-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chris-mcp-server
+  template:
+    metadata:
+      labels:
+        app: chris-mcp-server
+    spec:
+      containers:
+        - name: chris-mcp-server
+          image: ghcr.io/rrbanda/chris-mcp-server:latest
+          ports:
+            - containerPort: 3001
+          imagePullPolicy: Always
+      restartPolicy: Always
