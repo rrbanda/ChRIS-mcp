@@ -1,10 +1,9 @@
-# .github/workflows/docker-publish.yml
 name: Build and Publish MCP Server
 
 on:
   push:
     branches: ["main"]
-    paths: ["Dockerfile", "mcp_server/**", "server.py", "requirements.txt", ".github/workflows/**"]
+    paths: ["Containerfile", "mcp_server/**", "server.py", "requirements.txt", ".github/workflows/**"]
 
 jobs:
   publish:
@@ -12,13 +11,13 @@ jobs:
 
     permissions:
       contents: read
-      packages: write  # needed to push to GHCR
+      packages: write  # allow push to ghcr.io
 
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Log in to GitHub Container Registry
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -28,9 +27,10 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push image
+      - name: Build and push to GHCR using Containerfile
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: ./Containerfile  # this is the key difference
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/chris-mcp-server:latest
