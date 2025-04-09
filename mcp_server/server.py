@@ -44,7 +44,7 @@ def get_chris_root(*, args: Dict[str, Any]) -> str:
     """
     Fetch the root Collection+JSON document from a ChRIS API instance.
     """
-    url = args.get("url", "http://localhost/api/v1/")
+    url = args.get("url", "https://cube.chrisproject.org/api/v1/")
     if not url.startswith("http"):
         raise McpError(ErrorData(INVALID_PARAMS, "URL must start with http or https."))
 
@@ -64,7 +64,7 @@ def list_plugins(*, args: Dict[str, Any]) -> str:
     """
     Lists all available plugins in the ChRIS API instance.
     """
-    url = args.get("url", "https://localhost/api/v1/plugins/")
+    url = args.get("url", "https://cube.chrisproject.org/api/v1/plugins/")
     if not url.startswith("http"):
         raise McpError(ErrorData(INVALID_PARAMS, "URL must start with http or https."))
 
@@ -88,7 +88,7 @@ def get_plugin_instance(*, args: Dict[str, Any]) -> str:
     if not plugin_id:
         raise McpError(ErrorData(code=INVALID_PARAMS, message="Missing required argument: 'id'"))
 
-    url = f"http://localhost/api/v1/plugins/instances/{plugin_id}/"
+    url = f"https://cube.chrisproject.org/api/v1/plugins/instances/{plugin_id}/"
     try:
         response = requests.get(url, timeout=60)
         response.raise_for_status()
