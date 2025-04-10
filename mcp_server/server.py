@@ -30,10 +30,21 @@ def wrap_tool_output(tool_name: str, payload: Any) -> str:
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
     }, indent=2)
 
+# === Safety Helper ===
+def ensure_args_is_dict(args: Any) -> Dict[str, Any]:
+    if isinstance(args, str):
+        try:
+            fixed_args = json.loads(args.replace("'", '"'))
+            logger.warning(f"🔁 Fixed stringified args: {fixed_args}")
+            return fixed_args
+        except Exception as e:
+            logger.error(f"❌ Could not parse stringified args: {e}")
+            raise McpError(ErrorData(INVALID_PARAMS, "Invalid args format: must be dict or parseable JSON string"))
+    return args
+
 # === MCP Server ===
 mcp = FastMCP("chris")
 
-# === Tool: Health Check ===
 @mcp.tool(name="health_check", description="Simple test tool to confirm LlamaStack <-> ChRIS MCP integration.")
 def health_check(*, args: Dict[str, Any]) -> str:
     return wrap_tool_output("health_check", {
@@ -41,9 +52,9 @@ def health_check(*, args: Dict[str, Any]) -> str:
         "message": "From the ChRIS MCP server via FastMCP + LlamaStack."
     })
 
-# === Tool: Get ChRIS Root ===
 @mcp.tool(description="Fetch the root of a ChRIS API instance.")
 def get_chris_root(*, args: Dict[str, Any]) -> str:
+    args = ensure_args_is_dict(args)
     url = args.get("url", "https://cube.chrisproject.org/api/v1/")
     try:
         response = requests.get(url, timeout=60)
@@ -52,10 +63,9 @@ def get_chris_root(*, args: Dict[str, Any]) -> str:
     except requests.RequestException as e:
         raise McpError(ErrorData(INTERNAL_ERROR, f"ChRIS root error: {str(e)}"))
 
-# === Tool: List All Plugins ===
-
 @mcp.tool(description="List all available ChRIS plugins (public access).")
 def list_plugins(*, args: Dict[str, Any]) -> str:
+    args = ensure_args_is_dict(args)
     url = args.get("url", "https://cube.chrisproject.org/api/v1/plugins/")
     try:
         response = requests.get(url, timeout=60)
@@ -77,11 +87,9 @@ def list_plugins(*, args: Dict[str, Any]) -> str:
         logger.exception("Failed to list plugins")
         raise McpError(ErrorData(INTERNAL_ERROR, f"ChRIS plugin list error: {str(e)}"))
 
-
-
-# === Tool: Get Plugin Instance by ID ===
 @mcp.tool(description="Fetch plugin instance by ID.")
 def get_plugin_instance(*, args: Dict[str, Any]) -> str:
+    args = ensure_args_is_dict(args)
     plugin_id = args.get("id")
     if not plugin_id:
         raise McpError(ErrorData(INVALID_PARAMS, "Missing required argument: 'id'"))
@@ -94,12 +102,12 @@ def get_plugin_instance(*, args: Dict[str, Any]) -> str:
     except requests.RequestException as e:
         raise McpError(ErrorData(INTERNAL_ERROR, f"Plugin instance error: {str(e)}"))
 
-# === Tool: Search Plugins ===
 @mcp.tool(
     name="plugin_search",
     description="Search for ChRIS plugins by name, type, category, title, version or id. Public access only."
 )
 def plugin_search(*, args: Dict[str, Any]) -> str:
+    args = ensure_args_is_dict(args)
     base_url = args.get("url", "https://cube.chrisproject.org/api/v1/")
     plugins_url = f"{base_url.rstrip('/')}/plugins/"
     query_keys = ["name", "type", "category", "title", "version", "id"]
@@ -112,12 +120,12 @@ def plugin_search(*, args: Dict[str, Any]) -> str:
     except requests.RequestException as e:
         raise McpError(ErrorData(INTERNAL_ERROR, f"Plugin search failed: {str(e)}"))
 
-# === Tool: Run Plugin Instance (Requires Auth) ===
 @mcp.tool(
     name="run_plugin_instance",
     description="Run a ChRIS plugin instance (requires plugin_id, url, username, password)"
 )
 def run_plugin_instance(*, args: Dict[str, Any]) -> str:
+    args = ensure_args_is_dict(args)
     url = args.get("url")
     username = args.get("username")
     password = args.get("password")
