@@ -61,6 +61,7 @@ def list_plugins(*, args: Dict[str, Any]) -> str:
         response.raise_for_status()
         return wrap_tool_output("list_plugins", response.json())
     except requests.RequestException as e:
+        logger.exception("Failed to list plugins")
         raise McpError(ErrorData(INTERNAL_ERROR, f"ChRIS plugin list error: {str(e)}"))
 
 # === Tool: Get Plugin Instance by ID ===
