@@ -10,16 +10,15 @@ from llama_index.llms.ollama import Ollama
 MCP_URL = os.environ.get("MCP_URL", "http://localhost:3001/sse")
 MODEL_NAME = os.environ.get("LLM_MODEL", "llama3.2")
 TEMPERATURE = float(os.environ.get("LLM_TEMPERATURE", "0.7"))
-# Correct CONFIG_PATH
+
+# CONFIG_PATH should point to your config.json (sibling to this file)
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json")
-
-
 with open(os.path.abspath(CONFIG_PATH), "r") as f:
     CONFIG = json.load(f)
 
 # === AGENT SETUP ===
 async def setup_agent():
-    print(f"🔌 Connecting to MCP server at {MCP_URL}")
+    print(f"\n🔌 Connecting to MCP server at {MCP_URL}")
     mcp_client = BasicMCPClient(MCP_URL)
 
     print("🧰 Fetching available tools...")
@@ -28,7 +27,7 @@ async def setup_agent():
     for tool in tools:
         print(f" • {tool.metadata.name}: {tool.metadata.description or 'No description'}")
 
-    print(f"🤖 Initializing Ollama with model: {MODEL_NAME}")
+    print(f"\n🤖 Initializing Ollama with model: {MODEL_NAME}")
     llm = Ollama(model=MODEL_NAME, temperature=TEMPERATURE)
 
     agent = ReActAgent(
@@ -40,7 +39,7 @@ async def setup_agent():
     )
     return agent, mcp_client
 
-# === TOOL ROUTER WITH ARGUMENT INJECTION ===
+# === TOOL ROUTING FUNCTION ===
 def route_tool_and_args(query: str, tools: list, config: dict) -> tuple[str, dict]:
     tool_descriptions = "\n".join(
         f"- {tool.metadata.name}: {tool.metadata.description or 'No description'}" for tool in tools
@@ -72,10 +71,15 @@ Respond in this exact JSON format (no preamble or comments):
         tool_name = parsed["tool"]
         args = parsed.get("args", {})
 
-        # Inject credentials from config if missing
-        for field in ["url", "username", "password"]:
-            if not args.get(field):
-                args[field] = config.get(field)
+        # Inject only what's needed
+        tools_requiring_auth = {"run_plugin_instance"}
+        if tool_name in tools_requiring_auth:
+            for field in ["url", "username", "password"]:
+                if not args.get(field):
+                    args[field] = config.get(field)
+        else:
+            if not args.get("url"):
+                args["url"] = config.get("url")
 
         print(f"📦 Routed to: {tool_name} with args: {args}")
         return tool_name, args
@@ -83,13 +87,13 @@ Respond in this exact JSON format (no preamble or comments):
         print(f"❌ Failed to parse routing response: {result.stdout}")
         raise e
 
-# === SUMMARY FUNCTION ===
+# === SUMMARIZATION FUNCTION ===
 def summarize_output(output: str) -> str:
     summary_prompt = f"Summarize this ChRIS API output:\n\n{output}"
     result = subprocess.run(["ollama", "run", MODEL_NAME], input=summary_prompt, capture_output=True, text=True)
     return result.stdout.strip()
 
-# === MAIN CHAT LOOP ===
+# === MAIN CLI LOOP ===
 async def main():
     print("\n💬 Welcome to the ChRIS Natural Language MCP Client!")
     print("Ask questions like:")
@@ -110,15 +114,15 @@ async def main():
                 print("👋 Goodbye!")
                 break
 
-            # Step 1: Route tool + extract args
+            # Route + inject args
             tool, args = route_tool_and_args(query, agent.tools, CONFIG)
 
-            # Step 2: Call tool via MCP
+            # Execute
             print(f"🚀 Calling `{tool}` tool via MCP...")
             response = await mcp.call_tool(tool, {"args": args})
             print("🗂️ Raw output received.")
 
-            # Step 3: Summarize
+            # Summarize
             summary = summarize_output(str(response))
             print("\n📋 Summary:\n", summary)
 
