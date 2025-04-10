@@ -53,16 +53,31 @@ def get_chris_root(*, args: Dict[str, Any]) -> str:
         raise McpError(ErrorData(INTERNAL_ERROR, f"ChRIS root error: {str(e)}"))
 
 # === Tool: List All Plugins ===
+
 @mcp.tool(description="List all available ChRIS plugins (public access).")
 def list_plugins(*, args: Dict[str, Any]) -> str:
     url = args.get("url", "https://cube.chrisproject.org/api/v1/plugins/")
     try:
         response = requests.get(url, timeout=60)
         response.raise_for_status()
-        return wrap_tool_output("list_plugins", response.json())
+        plugins_data = response.json()
+
+        total = plugins_data.get("total", 0)
+        items = plugins_data.get("data") or plugins_data.get("results") or []
+
+        plugin_names = [plugin.get("name", "unknown") for plugin in items]
+
+        return wrap_tool_output("list_plugins", {
+            "total_plugins": total,
+            "example_plugin_names": plugin_names[:10],
+            "note": f"Showing first {min(10, len(plugin_names))} plugin names."
+        })
+
     except requests.RequestException as e:
         logger.exception("Failed to list plugins")
         raise McpError(ErrorData(INTERNAL_ERROR, f"ChRIS plugin list error: {str(e)}"))
+
+
 
 # === Tool: Get Plugin Instance by ID ===
 @mcp.tool(description="Fetch plugin instance by ID.")

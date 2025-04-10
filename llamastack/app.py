@@ -1,119 +1,88 @@
 import os
-import uuid
-import json
 import streamlit as st
-from llama_stack_client import LlamaStackClient, Agent
+import uuid
+from llama_stack_client import LlamaStackClient
+from llama_stack_client.types.agent_create_params import AgentConfig
+from llama_stack_client.lib.agents.agent import Agent
 
 # === CONFIG ===
-BASE_URL = os.getenv("REMOTE_BASE_URL", "https://llama-stack-llama-stack.apps.prod.rhoai.rh-aiservices-bu.com")
-TOOL_DEBUG = os.getenv("TOOL_DEBUG", "0") == "1"
+LLAMASTACK_BASE_URL = os.getenv("LLAMASTACK_BASE_URL", "https://llama-stack-llama-stack.apps.prod.rhoai.rh-aiservices-bu.com")
+MCP_TOOLGROUP = "mcp::chris"
 
-# === INIT CLIENT ===
-client = LlamaStackClient(base_url=BASE_URL)
+# === INIT ===
+client = LlamaStackClient(base_url=LLAMASTACK_BASE_URL)
 
-# === FETCH MODELS & MCP SERVERS ===
+# === GET MODEL ===
 try:
     models = client.models.list()
-    model_ids = [m.identifier for m in models if m.api_model_type == "llm"]
-    toolgroups = [tg.identifier for tg in client.toolgroups.list() if tg.identifier.startswith("mcp::")]
-    connected = True
+    model = next((m.identifier for m in models if m.api_model_type == "llm"), None)
+    if not model:
+        st.error("No LLM model found.")
+        st.stop()
 except Exception as e:
-    models = []
-    toolgroups = []
-    model_ids = []
-    connected = False
-    st.error(f"❌ Could not connect to LlamaStack: {e}")
+    st.error(f"Could not connect to LlamaStack: {e}")
+    st.stop()
 
-# === SIDEBAR CONFIG ===
-with st.sidebar:
-    st.title("🔌 LlamaStack")
-    if connected:
-        st.success("✅ Connected to LlamaStack")
-    else:
-        st.error("❌ Connection failed")
+# === AGENT SETUP ===
+agent_config = AgentConfig(
+    model=model,
+    instructions="You are a helpful AI assistant for the ChRIS medical image analysis platform. Use tools when needed.",
+    toolgroups=[MCP_TOOLGROUP],
+    sampling_params={"max_tokens": 1024}
+)
 
-    selected_model = st.selectbox("Model:", model_ids) if model_ids else ""
-    selected_toolgroups = st.multiselect("MCP Servers:", toolgroups, default=toolgroups)
+agent = Agent(client=client, agent_config=agent_config)
+session_id = agent.create_session(f"chat-{uuid.uuid4()}")
 
-# === AGENT (cached) ===
-@st.cache_resource
-def create_agent(model_id, tools):
-    return Agent(
-        client=client,
-        model=model_id,
-        instructions="You are a helpful agent for ChRIS. Use MCP tools if needed and summarize clearly.",
-        tools=tools,
-        sampling_params={"max_tokens": 1024}
-    )
-
-agent = create_agent(selected_model, selected_toolgroups)
-
-# === SESSION STATE ===
-if "session_id" not in st.session_state:
-    st.session_state.session_id = agent.create_session(f"chat-{uuid.uuid4()}")
+# === UI ===
+st.set_page_config(page_title="ChAI - ChRIS Assistant", page_icon="🧠")
+st.title("🧠 ChAI - Medical Image Assistant")
 
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "👋 Hi! Ask me anything about ChRIS — I’ll use the right tool if needed."}
+        {"role": "assistant", "content": "👋 Hi! Ask me anything about ChRIS and I’ll use tools if needed."}
     ]
 
-# === MAIN UI ===
-st.title("🧠 ChAI - Medical Image Analysis Assistant")
-
+# === RENDER CHAT HISTORY ===
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-prompt = st.chat_input("Ask a question about ChRIS...")
+# === INPUT PROMPT ===
+prompt = st.chat_input("Ask a question about ChRIS (e.g., what plugins exist?)")
 
 if prompt:
     st.chat_message("user").markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
 
+    # === RUN TURN ===
     turn = agent.create_turn(
-        session_id=st.session_state.session_id,
         messages=[{"role": "user", "content": prompt}],
+        session_id=session_id,
         stream=True
     )
 
-    def stream_response():
-        full_response = ""
+    def response_stream():
+        full = ""
         for chunk in turn:
-            if chunk.event and hasattr(chunk.event, "payload"):
+            if chunk.event and getattr(chunk.event, "payload", None):
                 payload = chunk.event.payload
 
                 if payload.event_type == "step_progress":
                     delta = getattr(payload.delta, "text", "")
-                    if delta:
-                        full_response += delta
-                        yield delta
+                    full += delta
+                    yield delta
 
                 elif payload.event_type == "step_complete":
-                    step = payload.step_details
-                    if step.step_type == "tool_execution":
-                        tool_name = step.tool_calls[0].tool_name
-                        tool_output_raw = step.tool_responses[0].content
-
-                        try:
-                            parsed = json.loads(tool_output_raw)
-                            pretty_output = json.dumps(parsed, indent=2)
-                        except Exception:
-                            pretty_output = tool_output_raw
-
-                        debug_block = (
-                            f"\n\n✅ **Tool**: `{tool_name}`\n"
-                            f"📤 **Output**:\n```json\n{pretty_output}\n```"
-                            if TOOL_DEBUG else f"\n\n✅ Tool `{tool_name}` executed."
-                        )
-                        yield debug_block
+                    if payload.step_details.step_type == "tool_execution":
+                        name = payload.step_details.tool_calls[0].tool_name
+                        out = payload.step_details.tool_responses[0].content
+                        yield f"\n\n✅ Tool `{name}` executed.\n```json\n{out}\n```"
 
             elif getattr(chunk, "error", None):
                 yield f"\n\n❌ Error: {chunk.error.get('message', 'Unknown error')}"
 
-        if full_response.strip() == "":
-            full_response = "✅ Tool executed, but no direct reply was generated."
-
-        st.session_state.messages.append({"role": "assistant", "content": full_response})
+        st.session_state.messages.append({"role": "assistant", "content": full or "✅ Tool executed."})
 
     with st.chat_message("assistant"):
-        st.write_stream(stream_response())
+        st.write_stream(response_stream())
