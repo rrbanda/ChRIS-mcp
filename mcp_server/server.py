@@ -162,6 +162,7 @@ def wrap_tool_output(tool_name: str, payload: Any) -> str:
 
 # === MCP Server & Tools ===
 mcp = FastMCP("ChRIS MCP Server 🚀", dependencies=["httpx"])
+sse = SseServerTransport("/messages/")
 
 # 1) List plugins
 @mcp.tool(name="list_chris_plugins", description="List plugins from ChRIS Cube")
@@ -170,18 +171,21 @@ async def list_chris_plugins(limit: int = 5) -> str:
     headers = {"Accept": "application/vnd.collection+json"}
     async with httpx.AsyncClient() as client:
         try:
-            resp = await client.get(url, params={"limit": limit}, headers=headers, timeout=10)
+            resp = await client.get(url, params={"limit": limit}, headers=headers, timeout=10.0)
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
             return wrap_tool_output("list_chris_plugins", {"error": str(e)})
     items = data.get("collection", {}).get("items", [])
-    plugins = [{d["name"]: d["value"] for d in item["data"]} for item in items]
+    plugins = [{d["name"]: d["value"] for d in item.get("data", [])} for item in items]
     return wrap_tool_output("list_chris_plugins", {"plugins": plugins})
 
-# 2) PACS stub
-@mcp.tool(name="get_pacs_image", description="Grab a PACS image URL by MRN")
-async def get_pacs_image(mrn: str) -> str:
+# 2) PACS stub (default MRN = "12345")
+@mcp.tool(
+    name="get_pacs_image",
+    description="Grab a PACS image URL by patient MRN (defaults to 12345)"
+)
+async def get_pacs_image(mrn: str = "12345") -> str:
     url = f"https://fakepacs.org/images/{mrn}.png"
     return wrap_tool_output("get_pacs_image", {"url": url})
 
@@ -190,18 +194,22 @@ async def get_pacs_image(mrn: str) -> str:
 async def get_pipeline_definition() -> str:
     return wrap_tool_output("get_pipeline_definition", PIPELINE_DEF)
 
-# 4) Run pipeline
-@mcp.tool(name="run_pipeline", description="Kick off the full LLD pipeline")
-async def run_pipeline(pipeline_id: str) -> str:
+# 4) Run pipeline (only one optional arg, MRN)
+@mcp.tool(
+    name="run_pipeline",
+    description="Kick off the full LLD pipeline for a given patient MRN (defaults to 12345)"
+)
+async def run_pipeline(mrn: str = "12345") -> str:
     job_id = f"job-{int(time.time())}"
     JOBS[job_id] = {
-      "pipeline_id": pipeline_id,
-      "steps": PIPELINE_DEF["plugin_tree"],
-      "start_time": time.time()
+        "pipeline_id": PIPELINE_DEF["name"],
+        "input_data": {"mrn": mrn},
+        "steps": PIPELINE_DEF["plugin_tree"],
+        "start_time": time.time()
     }
     return wrap_tool_output("run_pipeline", {"job_id": job_id})
 
-# 5) Job status w/ correct clamp & titles
+# 5) Job status with simulated delays
 @mcp.tool(name="get_job_status", description="Get status of a job with step delays")
 async def get_job_status(job_id: str) -> str:
     job = JOBS.get(job_id)
@@ -210,7 +218,6 @@ async def get_job_status(job_id: str) -> str:
     steps = job["steps"]
     elapsed = time.time() - job["start_time"]
     per_step = 30
-    # never go past the last index
     idx = min(int(elapsed // per_step), len(steps) - 1)
     completed = elapsed >= per_step * len(steps)
     status = "COMPLETED" if completed else "RUNNING"
@@ -232,7 +239,6 @@ async def get_job_results_report(job_id: str) -> str:
     return wrap_tool_output("get_job_results_report", REPORT_JSON)
 
 # === SSE & REST Endpoints ===
-sse = SseServerTransport("/messages/")
 async def handle_sse(request: Request):
     async with sse.connect_sse(request.scope, request.receive, request._send) as (r, w):
         await mcp._mcp_server.run(r, w, mcp._mcp_server.create_initialization_options())
@@ -242,22 +248,14 @@ async def api_root(request: Request):
 
 async def pacs_endpoint(request: Request):
     mrn = request.path_params["mrn"]
-    return JSONResponse({
-        "tool": "get_pacs_image",
-        "output": {"url": f"https://fakepacs.org/images/{mrn}.png"},
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
-    })
+    return JSONResponse(json.loads(await get_pacs_image(mrn)))
 
 async def pipeline_definition(request: Request):
-    return JSONResponse({
-        "tool": "get_pipeline_definition",
-        "output": PIPELINE_DEF,
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
-    })
+    return JSONResponse(json.loads(await get_pipeline_definition()))
 
 async def pipeline_run(request: Request):
-    pipeline_id = request.path_params["pipeline_id"]
-    return JSONResponse(json.loads(await run_pipeline(pipeline_id)))
+    # ignore the path param; MRN will default to "12345"
+    return JSONResponse(json.loads(await run_pipeline()))
 
 async def job_status(request: Request):
     job_id = request.path_params["job_id"]
@@ -284,3 +282,4 @@ app = Starlette(
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8096)
+
